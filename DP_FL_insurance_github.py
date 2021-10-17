@@ -21,7 +21,7 @@ from sklearn.model_selection import train_test_split
 
 
 np.random.seed(2022)
-os.chdir('data')
+#os.chdir('data')
 
 
  
@@ -227,7 +227,8 @@ def newtons_method(w_len, f_eval, grad_eval, hessian_eval, max_iter=1000, tol=1e
 
 def gauss_AC(d, eps, delta, n, R, L, K):
     return np.random.multivariate_normal(mean = np.zeros(d), cov = (256*(L**2)*R*(np.log(2.5*R*K/(delta*n))*np.log(2/delta))/(n**2 * eps**2))*np.eye(d))
-
+#def gauss_AC(d, eps, delta, n, R, L, K): #moments account form of noise
+    #return np.random.multivariate_normal(mean = np.zeros(d), cov = (8*(L**2)*R*np.log(1/delta)/(n**2 * eps**2))*np.eye(d))
 
 
 ##############EXPERIMENTS###################
@@ -235,18 +236,31 @@ dim = 7
 x_len = 7
 DO_COMPUTE = True
 ###########YOU CAN SET THESE PARAMETERS#########: 
-N = 5
+#N = 10, 5, 12
+N = 10
 M = N
-R = 15
-K = 5
-#num_trials = 2
-num_trials = 10
+#R = 25, 35, 50
+R = 35
+#K = 5
+n = int(np.ceil(len(df['charges'])/N))
+delta = 1/n**2
+#K = int(max(1, n*math.sqrt(10/(4*R)))) #needed for privacy by moments account; 10 = largest epsilon that we test
+K = int(max(1, n*10/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 10 = largest epsilon that we test
+num_trials = 2
+#num_trials = 10
 loss_freq = 5
 #n_reps = 3
 n_reps = 3
+#n_stepsizes = 10
 n_stepsizes = 10
-Ls = [100, 10000, 1000000, 100000000, 99999999999999999999999]
-epsilons = [0.2, 0.5, 1, 2.5, 5, 7.5, 10]
+Ls = [100, 
+      10000, 
+      1000000, 
+      100000000, 
+      99999999999999999999999999999999]
+epsilons = [
+    #0.2, 
+    0.5, 1, 2.5, 5, 7.5, 10]
 
 
 path = 'dp_insurance_N={:d}_K={:d}_R={:d}'.format(N,K,R)
@@ -407,11 +421,15 @@ print("local SGD test errors", loc_tests_trials)
 print("upsilon^2", upsilon)
 
  #########PLOTS########
-
+ 
+ ###error bar versions###
 fig = plt.figure()
 ax = fig.add_subplot(111)
-lower_p = 2.5
-upper_p = 97.5
+#lower_p = 2.5
+#upper_p = 97.5
+lower_p = 5
+upper_p = 95
+
 #Noisy MB SGD#
 noisyMB_errs = np.zeros(len(epsilons))
 noisyMB_means = {}
@@ -425,7 +443,7 @@ for e, eps in enumerate(epsilons):
 
 noisyMB_means_sorted = list(zip(*sorted(noisyMB_means.items())))[1] 
 ax.errorbar(epsilons, noisyMB_means_sorted, yerr = noisyMB_errs, color = '#1f77b4', ecolor='lightblue', mfc='#1f77b4',
-         mec='#1f77b4', capsize = 10, label='Noisy MB SGD after {:d} rounds'.format(R))
+          mec='#1f77b4', capsize = 10, label='Noisy MB SGD after {:d} rounds'.format(R))
 
 #Noisy Local SGD#
 noisyloc_errs = np.zeros(len(epsilons))
@@ -440,7 +458,7 @@ for e, eps in enumerate(epsilons):
 
 noisyloc_means_sorted = list(zip(*sorted(noisyloc_means.items())))[1] 
 ax.errorbar(epsilons, noisyloc_means_sorted, yerr = noisyloc_errs, color = '#ff7f0e', ecolor='navajowhite', mfc='#ff7f0e',
-         mec='#ff7f0e',  capsize = 10, label='Noisy Local SGD after {:d} rounds'.format(R))
+          mec='#ff7f0e',  capsize = 10, label='Noisy Local SGD after {:d} rounds'.format(R))
 
 
 #MB SGD#
@@ -461,7 +479,7 @@ loc_hi = min(1.0, percentile(loc_tests_trials, upper_p))
 for e, eps in enumerate(epsilons):
     loc_errs[e] = (loc_hi - loc_low)/2
 ax.errorbar(epsilons, [loc_mean]*len(epsilons), yerr = loc_errs, color = '#d62728', ecolor='lightcoral', mfc='#d62728',
-         mec='#d62728',  capsize = 10, label = 'Local SGD after {:d} rounds'.format(R))
+          mec='#d62728',  capsize = 10, label = 'Local SGD after {:d} rounds'.format(R))
 
 
 handles,labels = ax.get_legend_handles_labels()
@@ -473,3 +491,31 @@ ax.legend(handles, labels, loc='upper right')
 plt.savefig('plots' + path + 'errorbar_lin_test_error_vs_epsilon.png', dpi=400)
 plt.show()
 
+###no error bars version###
+###PLOT test error vs. epsilon###
+fig2 = plt.figure()
+ax2 = fig2.add_subplot(111)
+noisyMB_test_errors_sorted = sorted(noisyMB_tests_trials.items()) # sorted by key, return a list of tuples
+noisyloc_test_errors_sorted = sorted(noisyloc_tests_trials.items())
+l = list(zip(*noisyMB_test_errors_sorted))[1]
+m = []
+for i in range(len(l)):
+    m.append(np.average(l[i]))
+l2 = list(zip(*noisyloc_test_errors_sorted))[1]
+m2 = []
+for i in range(len(l2)):
+    m2.append(np.average(l2[i]))
+
+#ax2.plot(epsilons, list(zip(*noisyMB_test_errors_sorted))[1], label='Noisy MB SGD after {:d} rounds'.format(R))
+#ax2.plot(epsilons, list(zip(*noisyloc_test_errors_sorted))[1],label='Noisy Local SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, m, label='Noisy MB SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, m2,label='Noisy Local SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, [np.average(MB_tests_trials)]*len(epsilons), label = 'MB SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, [np.average(loc_tests_trials)]*len(epsilons), label = 'Local SGD after {:d} rounds'.format(R))
+handles,labels = ax2.get_legend_handles_labels()
+ax2.set_xlabel(r'$\epsilon$')
+ax2.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials)) 
+ax2.set_title(r'K = {:d}, $\upsilon_*^2$={:.2f}'.format(K, np.average(upsilon))) 
+ax2.legend(handles, labels, loc='upper right')
+plt.savefig('plots' + path + 'lin_test_error_vs_epsilon.png', dpi=400)
+plt.show()
