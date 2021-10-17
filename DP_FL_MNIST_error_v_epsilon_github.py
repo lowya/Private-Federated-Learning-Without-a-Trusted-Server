@@ -4,7 +4,6 @@
 @author: Andrew Lowy
 
 """
-
 import math
 import numpy as np
 from numpy.random import multivariate_normal
@@ -21,6 +20,7 @@ from sklearn.model_selection import train_test_split
 np.set_printoptions(precision=3, linewidth=240, suppress=True)
 np.random.seed(2021)
 
+q = 1/7 #fraction of mnist data we wish to use; q = 1 -> 8673 train examples per machine; q = 1/10 -> 867 train examples per machine
 ###Function to download and pre-process (normalize, PCA) mnist and store in "data" folder:
     ##Returns 4 arrays: train/test_features_by_machine = , train/test_labels_by_machine 
 def load_MNIST2(p, dim, path):
@@ -47,7 +47,8 @@ def load_MNIST2(p, dim, path):
     
     ## Group the data by digit
     #n_m = smallest number of occurences of any one digit (label) in mnist:
-    n_m = min([np.sum(labels == i) for i in range(10)]) #n_m = 5,421
+    #n_m = min([np.sum(labels == i) for i in range(10)]) #n_m = 5,421
+    n_m = int(min([np.sum(labels == i) for i in range(10)])*q) #smaller scale version 
     #use defaultdict to avoid key error https://stackoverflow.com/questions/5900578/how-does-collections-defaultdict-work:
     by_number = defaultdict(list)
     #append feature vectors to by_number until there are n_m of each digit
@@ -75,7 +76,7 @@ def load_MNIST2(p, dim, path):
         eo_both = np.concatenate([eo_labels.reshape(-1,1), eo_features], axis=1)
         #add eo_both to all_tasks:
         all_tasks.append(eo_both)
-    #all_tasks is a list of 25 ndarrays, each array corresponds to an (e,o) pair of digits (aka task) and is 10842 (examples) x 101 (100=dim (features) plus 1 =dim(label))
+    #all_tasks is a list of 25 ndarrays, each array corresponds to an (e,o) pair of digits (aka task) and is 10,842 (examples) x 101 (100=dim (features) plus 1 =dim(label))
     #all_evens: concatenated array of 5*n_m ones and 5*n_m = 27,105 feauture vectors (n_m for each even digit):
     all_evens = np.concatenate([np.ones((5*n_m,1)), np.concatenate([by_number[i] for i in even_numbers], axis=0)], axis=1)
     #all_odds: same thing but for odds and with zeros instead of ones:
@@ -114,7 +115,7 @@ def load_MNIST2(p, dim, path):
     train_labels_by_machine = np.array(train_labels_by_machine)
     test_labels_by_machine = np.array(test_labels_by_machine)
     print(train_features_by_machine.shape)
-    return train_features_by_machine, train_labels_by_machine, test_features_by_machine, test_labels_by_machine
+    return train_features_by_machine, train_labels_by_machine, test_features_by_machine, test_labels_by_machine, n_m
 
  
 
@@ -265,29 +266,36 @@ def newtons_method(w_len, f_eval, grad_eval, hessian_eval, max_iter=1000, tol=1e
 
 def gauss_AC(d, eps, delta, n, R, L, K): #advanced composition form of noise
     return np.random.multivariate_normal(mean = np.zeros(d), cov = (256*(L**2)*R*(np.log(2.5*R*K/(delta*n))*np.log(2/delta))/(n**2 * eps**2))*np.eye(d))
+#def gauss_AC(d, eps, delta, n, R, L, K): #moments account form of noise
+    #return np.random.multivariate_normal(mean = np.zeros(d), cov = (8*(L**2)*R*np.log(1/delta)/(n**2 * eps**2))*np.eye(d))
 
 ##################################################################################################################
+p = 0.0 #for full heterogeneity 
+#dim = 100
+dim = 50
 M = 25
-n = 8673 #total number of TRAINING examples per machine 
+path = 'temp'
+n_m = load_MNIST2(p, dim, path)[-1] #number of examples (train and test) per digit per machine 
+n = int(n_m*2*0.8) #total number of TRAINING examples (two digits) per machine 
 DO_COMPUTE = True
 
 ###User parameters - you can manually adjust these:### 
-num_trials = 1 #due to time/computation constraints, we recommend keeping num_trials = 1
+num_trials = 2 #due to time/computation constraints, we recommend keeping num_trials = 1 or 2
 #each trial involves a new train/test split for all N = M clients
 loss_freq = 5 
-n_reps = 3 #number of runs per train
-n_stepsizes = 10
+n_reps = 3 #number of runs per train split 
+n_stepsizes = 10 
+#n_stepsizes = 8
 
-epsilons = [0.75, 1.5, 3, 6, 12, 20]
+epsilons = [0.75, 1.5, 3, 6, 12, 18]
 delta = 1/(n**2)
-#Rs = [25, 50]
-R = 25
-#Ks = [50, 25, 10] 
-K = 10 #Run experiment for each different K in above list (try each combo of K and R)
-dim = 100
+#Rs = [15, 25]
+#R = 15
+R = 50 #then do R35&R50 with larger q = 1/4
+#K = int(max(1, n*math.sqrt(18/(4*R)))) #needed for privacy by moments account; 18 = largest epsilon that we test
+K = int(max(1, n*18/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 18 = largest epsilon that we test
 
 
-p = 0.0 #for full heterogeneity 
 path = 'dp_mnist_p={:.2f}_K={:d}_R={:d}'.format(p,K,R)
 
 avg_MB_test_error = 0
@@ -320,7 +328,7 @@ zeta = np.zeros(num_trials)
 if DO_COMPUTE:
     for trial in range(num_trials):
         print("DOING TRIAL", trial)
-        train_features, train_labels, test_features, test_labels = load_MNIST2(p,dim,path)
+        train_features, train_labels, test_features, test_labels = load_MNIST2(p,dim,path)[0:4]
         x_len = train_features.shape[2] #dim of data (after PCA) = 100
         def f_eval(w):
             return logistic_loss(w, train_features.reshape(-1,x_len), train_labels.reshape(-1))
@@ -462,9 +470,6 @@ ax.set_title(r'K = {:d}, $\upsilon_*^2$={:.2f}'.format(K, np.average(zeta)))
 ax.legend(handles, labels, loc='upper right')
 plt.savefig('plots' + path + 'test_error_vs_epsilon.png', dpi=400)
 plt.show()
-
-
-
 
 
 
