@@ -236,17 +236,17 @@ dim = 7
 x_len = 7
 DO_COMPUTE = True
 ###########YOU CAN SET THESE PARAMETERS#########: 
-#N = 10, 5, 12
-N = 10
+#N = 10, 5, 3, 15
+N = 3
 M = N
-#R = 25, 35, 50
+#R = 35, 50
 R = 35
 #K = 5
 n = int(np.ceil(len(df['charges'])/N))
 delta = 1/n**2
 #K = int(max(1, n*math.sqrt(10/(4*R)))) #needed for privacy by moments account; 10 = largest epsilon that we test
 K = int(max(1, n*10/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 10 = largest epsilon that we test
-num_trials = 2
+num_trials = 20
 #num_trials = 10
 loss_freq = 5
 #n_reps = 3
