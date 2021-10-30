@@ -1,21 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-@author: Andrew Lowy
+Created on Sun Oct 24 13:27:40 2021
+
+@author: andrewlowy
+"""
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+@author: anonymous
 
 """
+
 import math
 import numpy as np
+from numpy import mean
+from numpy import median
+from numpy import percentile
 from numpy.random import multivariate_normal
 import matplotlib.pyplot as plt
 import pickle
 import os
 import itertools
+import pandas as pd
 from collections import defaultdict
 from torchvision import datasets, transforms
 from sklearn.decomposition import PCA
 from sklearn import random_projection
 from sklearn.model_selection import train_test_split
+
 
 np.set_printoptions(precision=3, linewidth=240, suppress=True)
 np.random.seed(2021)
@@ -280,51 +294,63 @@ n = int(n_m*2*0.8) #total number of TRAINING examples (two digits) per machine
 DO_COMPUTE = True
 
 ###User parameters - you can manually adjust these:### 
-num_trials = 2 #due to time/computation constraints, we recommend keeping num_trials = 1 or 2
+num_trials = 20  
 #each trial involves a new train/test split for all N = M clients
 loss_freq = 5 
-n_reps = 3 #number of runs per train split 
-n_stepsizes = 10 
+#n_reps = 3 #number of runs per train split 
+n_reps = 3
+n_stepsizes = 10
 #n_stepsizes = 8
 
 epsilons = [0.75, 1.5, 3, 6, 12, 18]
 delta = 1/(n**2)
 #Rs = [15, 25]
 #R = 15
-R = 50 #then do R35&R50 with larger q = 1/4
+R = 35 #then do R35&R50 with larger q = 1/4
 #K = int(max(1, n*math.sqrt(18/(4*R)))) #needed for privacy by moments account; 18 = largest epsilon that we test
 K = int(max(1, n*18/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 18 = largest epsilon that we test
 
-
 path = 'dp_mnist_p={:.2f}_K={:d}_R={:d}'.format(p,K,R)
 
-avg_MB_test_error = 0
-avg_loc_test_error = 0
+# avg_MB_test_error = 0
+# avg_loc_test_error = 0
 
-avg_MB_train_error = 0
-avg_loc_train_error = 0
+# avg_MB_train_error = 0
+# avg_loc_train_error = 0
 
-noisyMB_test_errors = {}
-noisyMB_train_errors = {}
-noisyloc_test_errors = {}
-noisyloc_train_errors = {}
+# noisyMB_test_errors = {}
+# noisyMB_train_errors = {}
+# noisyloc_test_errors = {}
+# noisyloc_train_errors = {}
 
 
-#keep track of train excess risk too
-local_ls = 0
-MB_ls = 0
+# local_ls = np.zeros(num_trials)
+# MB_ls = np.zeros(num_trials)
+# noisylocal_ls = {}
+# noisyMB_ls = {}
+# noisyMB_tests_trials = {}
+# noisyloc_tests_trials = {}
+
+local_ls = np.zeros(num_trials)
+MB_ls = np.zeros(num_trials)
 noisylocal_ls = {}
 noisyMB_ls = {}
+noisyMB_tests_trials = {}
+noisyloc_tests_trials = {}
+
 
 for eps in epsilons:
-    noisyMB_test_errors[eps] = 0
-    noisyMB_train_errors[eps] = 0
-    noisyloc_test_errors[eps] = 0
-    noisyloc_train_errors[eps] = 0
-    noisylocal_ls[eps] = 0
-    noisyMB_ls[eps] = 0
-    
-zeta = np.zeros(num_trials)
+    noisylocal_ls[eps] = np.ones(num_trials)*1000
+    noisyMB_ls[eps] = np.ones(num_trials)*1000
+    noisyMB_tests_trials[eps] = np.ones(num_trials)*1000
+    noisyloc_tests_trials[eps] = np.ones(num_trials)*1000
+
+upsilons = np.zeros(num_trials)
+
+MB_tests_trials = np.zeros(num_trials)
+loc_tests_trials = np.zeros(num_trials)
+
+
 if DO_COMPUTE:
     for trial in range(num_trials):
         print("DOING TRIAL", trial)
@@ -346,9 +372,9 @@ if DO_COMPUTE:
         Fstar, wstar = newtons_method(x_len, f_eval, full_grad_eval, hessian_eval) 
         for m in range(M):
             nrm_nabla_Fm_star = np.linalg.norm(grad_eval(wstar, len(train_labels[m]), m)) #norm of grad of F_m
-            zeta[trial] += nrm_nabla_Fm_star**2 / M
+            upsilons[trial] += nrm_nabla_Fm_star**2 / M
         print('Fstar = {:.6f}'.format(Fstar))
-        print('zeta = {:.5f}'.format(zeta[trial]))
+        print('zeta = {:.5f}'.format(upsilons[trial]))
         
         #compute Lipschitz constant of log loss: (Note L <= 2* max(np.linalg.norm(x)))
         l = np.zeros(train_features.shape[1])
@@ -358,124 +384,207 @@ if DO_COMPUTE:
         L = 2*mx
         lg_stepsizes = [np.exp(exponent) for exponent in np.linspace(-6,0,n_stepsizes)] #MB SGD
         lc_stepsizes = [np.exp(exponent) for exponent in np.linspace(-8,-1,n_stepsizes)] #Local SGD
+        ###Non-private algorithms###
         print('Doing Minibatch SGD...') #for each stepsize option, compute average excess risk of MBSGD over n_reps trials
-        MB_results = np.zeros((R//loss_freq, len(lg_stepsizes)))
-        local_results = np.zeros((R//loss_freq, len(lc_stepsizes)))
-        MB_w = [np.zeros(dim)]*len(lg_stepsizes)
-        local_w = [np.zeros(dim)]*len(lc_stepsizes)
-        for i,stepsize in enumerate(lg_stepsizes):
-            print('Stepsize {:.5f}:  {:d}/{:d}'.format(stepsize, i+1, len(lg_stepsizes)))
+        MB_results = np.zeros(n_stepsizes)
+        local_results = np.zeros(n_stepsizes)
+        #MB_trains = np.zeros(len(gstepLproduct))
+        #local_trains = np.zeros(len(cstepLproduct)) 
+        MB_tests = np.zeros(n_stepsizes)
+        local_tests = np.zeros(n_stepsizes) 
+        for i, stepsize in enumerate(lg_stepsizes):
+            #w = np.zeros(dim)
+            print('Stepsize {:.5f}:  {:d}/{:d}'.format(stepsize, i+1, n_stepsizes))
             for rep in range(n_reps):
-                iterates, l, success = minibatch_sgd(x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval)
+                iterates, l, success = minibatch_sgd(x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8)
                 if success == 'converged':
-                    MB_results[:,i] += (l - Fstar) / n_reps #store in ith col: average excess risk vals (for all R//loss_freq iterates) over the n_reps= 4 trials 
-                    MB_w[i] += sum(iterates) / (len(iterates)*n_reps) # average of last avg_window iterates 
+                    MB_results[i] += (l[-1] - Fstar) / n_reps #average excess risk val over the n_reps= 4 trials 
+                    MB_tests[i] += test_err(np.average(iterates, axis=0),test_features, test_labels)/n_reps 
                 else:
-                    MB_results[:,i] += 100
-        print('Doing Local SGD...') #for each stepsize option, compute average excess risk of LocalSGD over nreps trials
-        for i,stepsize in enumerate(lc_stepsizes):
-            print('Stepsize {:.5f}:  {:d}/{:d}'.format(stepsize, i+1, len(lc_stepsizes)))
+                    MB_results[i] += 100
+                    MB_tests[i] += 100
+        MB_ls[trial] = np.min(MB_results) 
+        MB_step_index = np.argmin(MB_results) 
+        #noisyMB_w_opt = noisyMB_w[noisyMB_step_index]
+        MB_tests_trials[trial] = MB_tests[MB_step_index] 
+        print('Doing Local SGD...') #for each stepsize option, compute average excess risk of LocalSGD over 4 trials
+        for i, stepsize in enumerate(lc_stepsizes):
+            #w = np.zeros(dim)
+            print('Stepsize {:.5f}:  {:d}/{:d}'.format(stepsize, i+1, n_stepsizes))
             for rep in range(n_reps):
-                iterates, l, success = local_sgd(x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval)
+                iterates, l, success = local_sgd(x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8)
                 if success == 'converged':
-                    local_results[:,i] += (l - Fstar) / n_reps #average excess risk over the n_reps trials
-                    local_w[i] += sum(iterates) / (len(iterates)*n_reps) 
+                    local_results[i] += (l[-1] - Fstar) / n_reps #average excess risk over the n_reps= 4 trials
+                    #w += np.average(iterates,axis=0) / n_reps 
+                    local_tests[i] += test_err(np.average(iterates, axis=0), test_features, test_labels)/n_reps
                 else:
-                    local_results[:,i] += 100
-        local_l = np.min(local_results, axis = 1)
-        local_step_index = np.argmin(local_results, axis = 1) #1d array (of len = R//loss_freq)indices of optimal stepsizes at iter5, ..., iterR
-        final_local_step_index = local_step_index[-1] #stepsize that minimizes loss at final iteration
-        MB_l = np.min(MB_results, axis=1)
-        MB_step_index = np.argmin(MB_results, axis = 1) 
-        final_MB_step_index = MB_step_index[-1]
-        local_test_error = test_err(local_w[final_local_step_index],test_features, test_labels) 
-        MB_test_error = test_err(MB_w[final_MB_step_index], test_features, test_labels)
-        local_train_error = test_err(local_w[final_local_step_index],train_features, train_labels)
-        MB_train_error = test_err(MB_w[final_MB_step_index], train_features, train_labels)
+                    local_results[i] += 100
+                    local_tests[i] += 100
+        local_ls[trial] = np.min(local_results) 
+        local_step_index = np.argmin(local_results)  
+        loc_tests_trials[trial] = local_tests[local_step_index]
         
-        avg_MB_test_error += MB_test_error/num_trials
-        avg_loc_test_error += local_test_error/num_trials
-        avg_MB_train_error += MB_train_error/num_trials
-        avg_loc_train_error += local_train_error/num_trials
+        #######Noisy Algs#######
+        noisyMB_trains = {}
+        noisyMB_tests = {}
+        noisyloc_trains = {}
+        noisyloc_tests = {}
+        for eps in epsilons:
+            noisyMB_trains[eps] = np.zeros(n_stepsizes) 
+            noisyMB_tests[eps]= np.zeros(n_stepsizes)
+            noisyloc_trains[eps]=np.zeros(n_stepsizes)
+            noisyloc_tests[eps]=np.zeros(n_stepsizes) 
         
-        local_ls += local_l[-1]/num_trials
-        MB_ls += MB_l[-1]/num_trials
-        
-    
-    ####Noisy algorithms####
         for eps in epsilons:
             print('\n\nDOING eps = {:f}'.format(eps))
-            print('Doing Noisy MB SGD...') #for each stepsize option, compute average excess risk of MBSGD over n_reps trials
-            noisyMB_results = np.zeros((R//loss_freq, len(lg_stepsizes))) #store (e.g. 10 x 10) loss results for R//loss_freq (e.g. = 10) iterates for each (e.g. of 10) stepsize
-            noisyMB_w = [np.zeros(dim)]*len(lg_stepsizes)
-            for i,stepsize in enumerate(lg_stepsizes):
-                print('Stepsize {:.5f}:  {:d}/{:d}'.format(stepsize, i+1, len(lg_stepsizes)))
-                for rep in range(n_reps): #n_reps=4 trials for each stepsize
-                    iterates, l, success = ACnoisyMB_sgd(eps, delta, n, L, x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval)
+            print('Doing Noisy MB SGD...') #for each stepsize option, compute average excess risk of MBSGD over 4 trials
+            noisyMB_results = np.zeros(n_stepsizes) 
+            noisyloc_results = np.zeros(n_stepsizes) 
+            for i, stepsize in enumerate(lg_stepsizes): 
+            #w = np.zeros(dim)
+                print('Stepsize {:.5f}:  {:d}/{:d}'.format(stepsize, i+1, n_stepsizes))
+                for rep in range(n_reps): #n_reps=3 trials for each stepsize
+                    iterates, l, success = ACnoisyMB_sgd(eps, delta, n, L, x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8)
                     if success == 'converged':
-                        noisyMB_results[:,i] += (l - Fstar) / n_reps #each rep we add average excess risk over the n_reps runs to NoisyMB_results[:,i]
-                        #after all n_reps reps, NoisyMB_results[:,i] = l - Fstar = excess loss for i-th stepsize 
-                        noisyMB_w[i] += sum(iterates) / (len(iterates)*n_reps) #return average w over reps and last avg_window -1 = 7 iterations 
+                        noisyMB_results[i] += (l[-1] - Fstar) / n_reps 
+                        noisyMB_tests[eps][i] += test_err(np.average(iterates, axis=0), test_features, test_labels)/n_reps
                     else:
-                        noisyMB_results[:,i] += 100        
-            noisy_MB_l = np.min(noisyMB_results, axis=1) #array of minimum (over all stepsizes) loss value at each of 10 spaced out iterates 
-            noisyMB_step_index = np.argmin(noisyMB_results, axis = 1) 
-            final_noisyMB_step_index = noisyMB_step_index[-1]
-            print("optimal noisy MB stepsize for eps = {:f} is".format(eps), lg_stepsizes[final_noisyMB_step_index])
-            noisyMB_test_errors[eps] += test_err(noisyMB_w[final_noisyMB_step_index], test_features, test_labels)/num_trials
-            noisyMB_train_errors[eps] += test_err(noisyMB_w[final_noisyMB_step_index], train_features, train_labels)/num_trials
+                            noisyMB_results[i] += 100
+                            noisyMB_tests[eps][i] += 100
+            noisy_MB_l = np.min(noisyMB_results)  
+            noisyMB_ls[eps][trial] = noisy_MB_l 
+            noisyMB_step_index = np.argmin(noisyMB_results) 
+            t = noisyMB_tests[eps][noisyMB_step_index] 
+            print("noisy MB test error for trial {:d} is".format(trial), t)
+            noisyMB_tests_trials[eps][trial] = t
         
-            print('Doing Noisy Local GD...') #for each stepsize option, compute average excess risk of MBSGD over nreps runs
-            noisyloc_results = np.zeros((R//loss_freq, len(lc_stepsizes))) #store (e.g. 10 x 10) loss results for R//loss_freq (e.g. = 10) iterates for each (e.g. of 10) stepsize
-            noisyloc_w = [np.zeros(dim)]*len(lc_stepsizes)
-            for i,stepsize in enumerate(lc_stepsizes):
+            print('Doing Noisy Local GD...')  
+            for i, stepsize in enumerate(lc_stepsizes): 
+            #w = np.zeros(dim)
                 print('Stepsize {:.5f}:  {:d}/{:d}'.format(stepsize, i+1, len(lc_stepsizes)))
-                for rep in range(n_reps): #n_reps=4 trials for each stepsize
-                    iterates, l, success = ACnoisy_local_sgd(eps, delta, n, L, x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval)
+                for rep in range(n_reps):
+                    iterates, l, success = ACnoisy_local_sgd(eps, delta, n, L, x_len, M, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8)
                     if success == 'converged':
-                        noisyloc_results[:,i] += (l - Fstar) / n_reps #each rep we add average excess risk over the n_reps trials to NoisyMB_results[:,i]
-                #after all n_reps reps, NoisyMB_results[:,i] = l - Fstar = excess loss for i-th stepsize 
-                        noisyloc_w[i] += sum(iterates) / (len(iterates)*n_reps)
+                        noisyloc_results[i] += (l[-1] - Fstar) / n_reps  
+                        noisyloc_tests[eps][i] += test_err(np.average(iterates, axis=0), test_features, test_labels)/n_reps
                     else:
-                        noisyloc_results[:,i] += 100    
-            noisy_loc_l = np.min(noisyloc_results, axis = 1)
-            noisyloc_step_index = np.argmin(noisyloc_results, axis = 1)
-            final_noisyloc_step_index = noisyloc_step_index[-1]
-            print("optimal noisy loc stepsize for eps = {:f} is".format(eps), lc_stepsizes[final_noisyloc_step_index])
-            noisyloc_test_errors[eps] += test_err(noisyloc_w[final_noisyloc_step_index], test_features, test_labels)/num_trials
-            noisyloc_train_errors[eps] += test_err(noisyloc_w[final_noisyloc_step_index], train_features, train_labels)/num_trials
-            
-            noisylocal_ls[eps] += noisy_loc_l[-1]/num_trials
-            noisyMB_ls[eps] += noisy_MB_l[-1]/num_trials
-        
+                        noisyloc_results[i] += 100 
+                        noisyloc_tests[eps][i] += 100 
+            noisy_loc_l = np.min(noisyloc_results)
+            noisylocal_ls[eps][trial] = noisy_loc_l 
+            noisyloc_stepL_index = np.argmin(noisyloc_results)
+            u = noisyloc_tests[eps][noisyloc_stepL_index] 
+            print("noisy loc test error for trial {:d} is".format(trial), u)
+            noisyloc_tests_trials[eps][trial] = u
 
-print("noisy MB test errors", noisyMB_test_errors)
-print("noisy loc test errors", noisyloc_test_errors)
-print("MB test error", avg_MB_test_error)
-print("local SGD test error", avg_loc_test_error)
+      
+print("noisy MB test errors", noisyMB_tests_trials)
+print("noisy loc test errors", noisyloc_tests_trials)
+print("MB test errors", MB_tests_trials)
+print("local SGD test errors", loc_tests_trials)
+print("upsilon^2", upsilons)
 
-###PLOT test error vs. epsilon###
+ #########PLOTS########
+ 
+ ###error bar versions###
 fig = plt.figure()
 ax = fig.add_subplot(111)
-noisyMB_test_errors_sorted = sorted(noisyMB_test_errors.items()) # sorted by key, return a list of tuples
-noisyloc_test_errors_sorted = sorted(noisyloc_test_errors.items())
-ax.plot(epsilons, list(zip(*noisyMB_test_errors_sorted))[1], label='Noisy MB SGD after {:d} rounds'.format(R))
-ax.plot(epsilons, list(zip(*noisyloc_test_errors_sorted))[1],label='Noisy Local SGD after {:d} rounds'.format(R))
-ax.plot(epsilons, [avg_MB_test_error]*len(epsilons), label = 'MB SGD after {:d} rounds'.format(R))
-ax.plot(epsilons, [avg_loc_test_error]*len(epsilons), label = 'Local SGD after {:d} rounds'.format(R))
+#lower_p = 2.5
+#upper_p = 97.5
+lower_p = 5
+upper_p = 95
+
+#Noisy MB SGD#
+noisyMB_errs = np.zeros(len(epsilons))
+noisyMB_means = {}
+noisyMB_lows = {}
+noisyMB_his = {}
+for e, eps in enumerate(epsilons):
+    noisyMB_means[eps] = np.average(noisyMB_tests_trials[eps])
+    noisyMB_lows[eps] = max(0.0, percentile(noisyMB_tests_trials[eps], lower_p))
+    noisyMB_his[eps] = min(1.0, percentile(noisyMB_tests_trials[eps], upper_p))
+    noisyMB_errs[e] = (noisyMB_his[eps] - noisyMB_lows[eps])/2
+
+noisyMB_means_sorted = list(zip(*sorted(noisyMB_means.items())))[1] 
+ax.errorbar(epsilons, noisyMB_means_sorted, yerr = noisyMB_errs, color = '#1f77b4', ecolor='lightblue', mfc='#1f77b4',
+          mec='#1f77b4', capsize = 10, label='Noisy MB SGD after {:d} rounds'.format(R))
+
+#Noisy Local SGD#
+noisyloc_errs = np.zeros(len(epsilons))
+noisyloc_means = {}
+noisyloc_lows = {}
+noisyloc_his = {}
+for e, eps in enumerate(epsilons):
+    noisyloc_means[eps] = np.average(noisyloc_tests_trials[eps])
+    noisyloc_lows[eps] = max(0.0, percentile(noisyloc_tests_trials[eps], lower_p))
+    noisyloc_his[eps] = min(1.0, percentile(noisyloc_tests_trials[eps], upper_p))
+    noisyloc_errs[e] = (noisyloc_his[eps] - noisyloc_lows[eps])/2
+
+noisyloc_means_sorted = list(zip(*sorted(noisyloc_means.items())))[1] 
+ax.errorbar(epsilons, noisyloc_means_sorted, yerr = noisyloc_errs, color = '#ff7f0e', ecolor='navajowhite', mfc='#ff7f0e',
+          mec='#ff7f0e',  capsize = 10, label='Noisy Local SGD after {:d} rounds'.format(R))
+
+
+#MB SGD#
+MB_errs = np.zeros(len(epsilons))
+MB_mean = np.average(MB_tests_trials)
+MB_low = max(0.0, percentile(MB_tests_trials, lower_p))
+MB_hi = min(1.0, percentile(MB_tests_trials, upper_p))
+for e, eps in enumerate(epsilons):
+    MB_errs[e] = (MB_hi - MB_low)/2
+ax.errorbar(epsilons, [MB_mean]*len(epsilons), yerr = MB_errs, color = '#2ca02c', ecolor='lightgreen', mfc='#2ca02c',
+            mec='#2ca02c', capsize = 10,  label = 'MB SGD after {:d} rounds'.format(R))
+
+#Local SGD#
+loc_errs = np.zeros(len(epsilons))
+loc_mean = np.average(loc_tests_trials)
+loc_low = max(0.0, percentile(loc_tests_trials, lower_p))
+loc_hi = min(1.0, percentile(loc_tests_trials, upper_p))
+for e, eps in enumerate(epsilons):
+    loc_errs[e] = (loc_hi - loc_low)/2
+ax.errorbar(epsilons, [loc_mean]*len(epsilons), yerr = loc_errs, color = '#d62728', ecolor='lightcoral', mfc='#d62728',
+          mec='#d62728',  capsize = 10, label = 'Local SGD after {:d} rounds'.format(R))
+
+
 handles,labels = ax.get_legend_handles_labels()
 ax.set_xlabel(r'$\epsilon$')
-ax.set_ylabel('Test Error') 
-ax.set_title(r'K = {:d}, $\upsilon_*^2$={:.2f}'.format(K, np.average(zeta))) 
+ax.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials))
+#ax.set_title('K = {:d}, $\upsilon$={:.2f}, {:d} Trials'.format(K, np.average(upsilon), num_trials))  
+ax.set_title(r'N = {:d}, K = {:d}, $\upsilon_*^2$={:.1f}'.format(M, K, np.average(upsilons)))
 ax.legend(handles, labels, loc='upper right')
-plt.savefig('plots' + path + 'test_error_vs_epsilon.png', dpi=400)
+plt.savefig('plots' + path + 'errorbar_mnist_test_error_vs_epsilon.png', dpi=400)
 plt.show()
 
+###no error bars version###
+###PLOT test error vs. epsilon###
+fig2 = plt.figure()
+ax2 = fig2.add_subplot(111)
+noisyMB_test_errors_sorted = sorted(noisyMB_tests_trials.items()) # sorted by key, return a list of tuples
+noisyloc_test_errors_sorted = sorted(noisyloc_tests_trials.items())
+l = list(zip(*noisyMB_test_errors_sorted))[1]
+m = []
+for i in range(len(l)):
+    m.append(np.average(l[i]))
+l2 = list(zip(*noisyloc_test_errors_sorted))[1]
+m2 = []
+for i in range(len(l2)):
+    m2.append(np.average(l2[i]))
 
+#ax2.plot(epsilons, list(zip(*noisyMB_test_errors_sorted))[1], label='Noisy MB SGD after {:d} rounds'.format(R))
+#ax2.plot(epsilons, list(zip(*noisyloc_test_errors_sorted))[1],label='Noisy Local SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, m, label='Noisy MB SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, m2,label='Noisy Local SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, [np.average(MB_tests_trials)]*len(epsilons), label = 'MB SGD after {:d} rounds'.format(R))
+ax2.plot(epsilons, [np.average(loc_tests_trials)]*len(epsilons), label = 'Local SGD after {:d} rounds'.format(R))
+handles,labels = ax2.get_legend_handles_labels()
+ax2.set_xlabel(r'$\epsilon$')
+ax2.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials)) 
+ax2.set_title(r'K = {:d}, $\upsilon_*^2$={:.2f}'.format(K, np.average(upsilons))) 
+ax2.legend(handles, labels, loc='upper right')
+plt.savefig('plots' + path + 'mnist_test_error_vs_epsilon.png', dpi=400)
+plt.show()
 
-
-
-
+  
 
 
 
