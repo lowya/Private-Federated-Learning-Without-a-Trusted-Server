@@ -103,7 +103,7 @@ def F_eval(w, X, Y): #avg squared loss on input data set (or batch) X,Y #returns
 
 ##################################################################################################################
 
-def local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval):
+def local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval, L):
     w_end = np.zeros_like(w_start) #initialize at 0
     #randomly choose Mavail out of the M clients:
     S = np.random.choice(list(range(M)), size=Mavail, replace=False, p=None)
@@ -111,11 +111,13 @@ def local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval):
         w = w_start.copy()
         for _ in range(K): #K steps of local SGD 
             g = grad_eval(w, 1, m)
+            c = min(1, L/np.linalg.norm(g)) #clip
+            g = g*c
             w -= stepsize * g #one step 
         w_end += w / Mavail #average SGD updates across M clients  
     return w_end #return updated w
 
-def noisy_local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval):
+def noisy_local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval, L):
     w_end = np.zeros_like(w_start) #initialize at 0
     #randomly choose Mavail out of the M clients:
     S = np.random.choice(list(range(M)), size=Mavail, replace=False, p=None)
@@ -123,28 +125,30 @@ def noisy_local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval):
         w = w_start.copy()
         for _ in range(K): #K steps of local SGD 
             g = grad_eval(w, 1, m)
+            c = min(1, L/np.linalg.norm(g)) #clip
+            g = g*c
             w -= stepsize * (g + gauss_AC(x_len, eps, delta, n, K*R, L, K)) #one step 
-        w_end += w / Mavail #average SGD updates across Mavail clients  
+        w_end += w / Mavail #average SGD updates across M clients 
     return w_end #return updated w
 
-def local_sgd(x_len, M,Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8):
+def local_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, L, avg_window=8):
     losses = []
     iterates = [np.zeros(x_len)] #initialize list with x_len 0's 
     for r in range(R):
         if len(iterates) >= avg_window: 
-            iterates = iterates[-(avg_window-1):] #just store the last avg_window-1 =7 iterates
-        iterates.append(local_sgd_round(iterates[-1], M, Mavail, K, stepsize, grad_eval)) #run local sgd round and add it to iterates
+            iterates = iterates[-(avg_window-1):] #just store the last 8 iterates
+            iterates.append(local_sgd_round(iterates[-1], M, Mavail, K, stepsize, grad_eval, L)) #run local sgd round and add it to iterates
         if (r+1) % loss_freq == 0:
-            losses.append(f_eval(np.average(iterates,axis=0))) #evalute f (at average of last 7 iterates) every loss_freq rounds 
+            losses.append(f_eval(np.average(iterates,axis=0))) #evalute f (at average of last 8 iterates) every loss_freq rounds 
             print('Iteration: {:d}/{:d}   Loss: {:f}                 \r'.format(r+1,R,losses[-1]), end='')
-            if losses[-1] > 100:
+            if losses[-1] > 5000000000:
                 print('\nLoss is diverging: Loss = {:f}'.format(losses[-1]))
-                return losses, 'diverged'
+                return iterates, losses, 'diverged'
     print('')
     return iterates, losses, 'converged'
 
 
-def minibatch_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8):
+def minibatch_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, L, avg_window=8):
     losses = []
     iterates = [np.zeros(x_len)]
     for r in range(R):
@@ -154,51 +158,57 @@ def minibatch_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval
         #randomly choose Mavail out of the M clients:
         S = np.random.choice(list(range(M)), size=Mavail, replace=False, p=None)
         for m in S:
-            g += grad_eval(iterates[-1], K, m) #evaluate stoch grad of log loss at last iterate 
+            c = min(1, L/np.linalg.norm(grad_eval(iterates[-1], K, m))) #clip (use bigger threshold since we are clipping sum of K grads)
+            g += grad_eval(iterates[-1], K, m)*c #evaluate stoch MB grad of loss at last iterate and clip
         iterates.append(iterates[-1] - stepsize * g) #take SGD step and add new iterate to list iterates 
         if (r+1) % loss_freq == 0:
             losses.append(f_eval(np.average(iterates,axis=0))) #evalute f (at average of last 7 iterates) every loss_freq rounds and append to list "losses"
             print('Iteration: {:d}/{:d}   Loss: {:f}                 \r'.format(r+1,R,losses[-1]), end='')
-            if losses[-1] > 100:
+            if losses[-1] > 5000000000:
                 print('\nLoss is diverging: Loss = {:f}'.format(losses[-1]))
                 return iterates, losses, 'diverged'
     print('')
     return iterates, losses, 'converged'   
 
-def ACnoisyMB_sgd(eps, delta, n, L, x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8):
+def ACnoisyMB_sgd(eps, L, x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8):  
     losses = []
     iterates = [np.zeros(x_len)]
     for r in range(R):
         if len(iterates) >= avg_window:
             iterates = iterates[-(avg_window-1):] #just store the last avg_window-1 =7 iterates
         g = np.zeros(x_len) #start with g = 0 vector of dim x_len = 100 
-        #randomly choose Mavail out of the M clients:
         S = np.random.choice(list(range(M)), size=Mavail, replace=False, p=None)
         for m in S:
-            g += grad_eval(iterates[-1], K, m) + gauss_AC(x_len, eps, delta, n, R, L, K) #evaluate stoch MB grad of log loss at last iterate, then add noise
+            n = len(train_labels_by_machine[m])
+            delta = 1/n**2
+            b = grad_eval(iterates[-1], K, m) 
+            c = min(1, L/np.linalg.norm(b)) #clip
+            b = b*c
+            g = g + b + gauss_AC(x_len, eps, delta, n, R, L, K) 
         iterates.append(iterates[-1] - stepsize * g) #take SGD step and add new iterate to list iterates 
         if (r+1) % loss_freq == 0:
-            losses.append(f_eval(np.average(iterates,axis=0))) #evalute f (at average of last 7 iterates) every loss_freq rounds and append to list "losses"
+            losses.append(f_eval(np.average(iterates,axis=0)))
+            #evalute F (at average of last 7 iterates) every loss_freq rounds and append to list "losses"
             print('Iteration: {:d}/{:d}   Loss: {:f}                 \r'.format(r+1,R,losses[-1]), end='')
-            if losses[-1] > 100:
+            if losses[-1] > 5000000000:
                 print('\nLoss is diverging: Loss = {:f}'.format(losses[-1]))
-                return losses, 'diverged'
+                return iterates, losses, 'diverged'
     print('')
     return iterates, losses, 'converged' #returns log loss fxn value 
 
-def ACnoisy_local_sgd(eps, delta, n, L, x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8): #LDP (not CDP) variant of McMahon et al 2018
+def ACnoisy_local_sgd(eps, L, x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, avg_window=8): #LDP (not CDP) variant of McMahon et al 2018
     losses = []
     iterates = [np.zeros(x_len)] #initialize list with x_len 0's 
     for r in range(R):
         if len(iterates) >= avg_window: 
             iterates = iterates[-(avg_window-1):] #just store the last avg_window-1 =7 iterates
-        iterates.append(noisy_local_sgd_round(iterates[-1], M, Mavail, K, stepsize, grad_eval)) #run local sgd round + noise, and add it to iterates
+        iterates.append(noisy_local_sgd_round(iterates[-1], M, Mavail, K, stepsize, grad_eval, L)) #run local sgd round + noise, and add it to iterates
         if (r+1) % loss_freq == 0:
-            losses.append(f_eval(np.average(iterates,axis=0))) #evalute f (at average of last 7 iterates) every loss_freq rounds 
+            losses.append(f_eval(np.average(iterates,axis=0))) #evalute F (at average of last 7 iterates) every loss_freq rounds 
             print('Iteration: {:d}/{:d}   Loss: {:f}                 \r'.format(r+1,R,losses[-1]), end='')
-            if losses[-1] > 100:
+            if losses[-1] > 5000000000:
                 print('\nLoss is diverging: Loss = {:f}'.format(losses[-1]))
-                return losses, 'diverged'
+                return iterates, losses, 'diverged'
     print('')
     return iterates, losses, 'converged'
 
@@ -231,16 +241,15 @@ dim = 7
 x_len = 7
 DO_COMPUTE = True
 ###########YOU CAN SET THESE PARAMETERS#########: 
-#N = 3,5,10
+#N = 10, 5, 3, 15
 N = 3
 M = N
-Mavail = 3 #do Mavail = int(N/2) and Mavail = int(3*N/4) and Mavail= N
+Mavail = 2
 #R = 35, 50
 R = 35
 #K = 5
 n = int(np.ceil(len(df['charges'])/N))
 delta = 1/n**2
-#NoteL 1070 train examples => n <=  1070/N_max = 1070/10 = 107; so we have LDP as long as epsilon <=  2*math.log(107**2) = 18.691315337847623
 K = int(max(1, n*math.sqrt(10/(4*R)))) #needed for privacy by moments account; 10 = largest epsilon that we test
 #K = int(max(1, n*10/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 10 = largest epsilon that we test
 num_trials = 20
@@ -417,7 +426,7 @@ print("MB test errors", MB_tests_trials)
 print("local SGD test errors", loc_tests_trials)
 print("upsilon^2", upsilon)
 
- #########PLOTS########
+ #########PLOTS######## TO EDIT : MAVAIL!
  
  ###error bar versions###
 fig = plt.figure()
@@ -512,7 +521,7 @@ ax2.plot(epsilons, [np.average(loc_tests_trials)]*len(epsilons), label = 'Local 
 handles,labels = ax2.get_legend_handles_labels()
 ax2.set_xlabel(r'$\epsilon$')
 ax2.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials)) 
-ax2.set_title(r'K = {:d}, $\upsilon_*^2$={:.2f}'.format(K, np.average(upsilon))) 
+ax2.set_title(r'N = {:d}, M = {:d}, K = {:d}, $\upsilon_*^2$={:.1f}'.format(N, Mavail, K, np.average(upsilon)))
 ax2.legend(handles, labels, loc='upper right')
 plt.savefig('plots' + path + 'lin_test_error_vs_epsilon.png', dpi=400)
 plt.show()
