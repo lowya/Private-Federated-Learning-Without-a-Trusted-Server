@@ -103,6 +103,20 @@ def F_eval(w, X, Y): #avg squared loss on input data set (or batch) X,Y #returns
 
 ##################################################################################################################
 
+# def local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval, L):
+#     w_end = np.zeros_like(w_start) #initialize at 0
+#     #randomly choose Mavail out of the M clients:
+#     S = np.random.choice(list(range(M)), size=Mavail, replace=False, p=None)
+#     for m in S: #iterate through all Mavail available workers 
+#         w = w_start.copy()
+#         for _ in range(K): #K steps of local SGD 
+#             g = grad_eval(w, 1, m)
+#             c = min(1, L/np.linalg.norm(g)) #clip
+#             g = g*c
+#             w -= stepsize * g #one step 
+#         w_end += w / Mavail #average SGD updates across M clients  
+#     return w_end #return updated w
+
 def local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval, L):
     w_end = np.zeros_like(w_start) #initialize at 0
     #randomly choose Mavail out of the M clients:
@@ -116,6 +130,7 @@ def local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval, L):
             w -= stepsize * g #one step 
         w_end += w / Mavail #average SGD updates across M clients  
     return w_end #return updated w
+
 
 def noisy_local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval, L):
     w_end = np.zeros_like(w_start) #initialize at 0
@@ -131,13 +146,28 @@ def noisy_local_sgd_round(w_start, M, Mavail, K, stepsize, grad_eval, L):
         w_end += w / Mavail #average SGD updates across M clients 
     return w_end #return updated w
 
+# def local_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, L, avg_window=8):
+#     losses = []
+#     iterates = [np.zeros(x_len)] #initialize list with x_len 0's 
+#     for r in range(R):
+#         if len(iterates) >= avg_window: 
+#             iterates = iterates[-(avg_window-1):] #just store the last 8 iterates
+#             iterates.append(local_sgd_round(iterates[-1], M, Mavail, K, stepsize, grad_eval, L)) #run local sgd round and add it to iterates
+#         if (r+1) % loss_freq == 0:
+#             losses.append(f_eval(np.average(iterates,axis=0))) #evalute f (at average of last 8 iterates) every loss_freq rounds 
+#             print('Iteration: {:d}/{:d}   Loss: {:f}                 \r'.format(r+1,R,losses[-1]), end='')
+#             if losses[-1] > 5000000000:
+#                 print('\nLoss is diverging: Loss = {:f}'.format(losses[-1]))
+#                 return iterates, losses, 'diverged'
+#     print('')
+#     return iterates, losses, 'converged'
 def local_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, L, avg_window=8):
     losses = []
     iterates = [np.zeros(x_len)] #initialize list with x_len 0's 
     for r in range(R):
         if len(iterates) >= avg_window: 
             iterates = iterates[-(avg_window-1):] #just store the last 8 iterates
-            iterates.append(local_sgd_round(iterates[-1], M, Mavail, K, stepsize, grad_eval, L)) #run local sgd round and add it to iterates
+        iterates.append(local_sgd_round(iterates[-1], M, Mavail, K, stepsize, grad_eval, L)) #run local sgd round and add it to iterates
         if (r+1) % loss_freq == 0:
             losses.append(f_eval(np.average(iterates,axis=0))) #evalute f (at average of last 8 iterates) every loss_freq rounds 
             print('Iteration: {:d}/{:d}   Loss: {:f}                 \r'.format(r+1,R,losses[-1]), end='')
@@ -242,31 +272,54 @@ x_len = 7
 DO_COMPUTE = True
 ###########YOU CAN SET THESE PARAMETERS#########: 
 #N = 10, 5, 3, 15
-N = 3
+#N = 3
+N=5
 M = N
-Mavail = 2
+#Mavail = 2
+Mavail = 3
 #R = 35, 50
 R = 35
 #K = 5
 n = int(np.ceil(len(df['charges'])/N))
 delta = 1/n**2
-K = int(max(1, n*math.sqrt(10/(4*R)))) #needed for privacy by moments account; 10 = largest epsilon that we test
-#K = int(max(1, n*10/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 10 = largest epsilon that we test
 num_trials = 20
-#num_trials = 10
+#num_trials = 1
 loss_freq = 5
-#n_reps = 3
 n_reps = 3
-#n_stepsizes = 10
+#n_reps = 2
 n_stepsizes = 10
+#n_stepsizes = 5
 Ls = [100, 
       10000, 
       1000000, 
       100000000, 
       99999999999999999999999999999999]
+# epsilons = [
+#     0.5, 
+#     1, 
+#     2.5, 
+#     5, 
+#     7.5, 
+#     10]
+
+# epsilons = [
+#     .25, 
+#     .5, 
+#     1, 
+#     2,
+#     3.5, 
+#     5]
+
 epsilons = [
-    #0.2, 
-    0.5, 1, 2.5, 5, 7.5, 10]
+    .125,
+    .25, 
+    .5, 
+    1, 
+    2,
+    3]
+
+K = int(max(1, n*math.sqrt(max(epsilons)/(4*R)))) #needed for privacy by moments account; 
+#K = int(max(1, n*max(epsilons)/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 
 
 
 path = 'dp_insurance_N={:d}_K={:d}_R={:d}'.format(N,K,R)
@@ -325,6 +378,46 @@ if DO_COMPUTE:
         print('Fstar = {:.6f}'.format(Fstar))
         print('upsilon^2 = {:.5f}'.format(upsilon[trial]))
         #Fstar_test = F_eval(wstar, test_features, test_labels)
+        
+        # #####NON PRIVATE Distributed ALGS######
+        # print('Doing Minibatch SGD...') #for each stepsize option, compute average excess risk of MBSGD over n_reps trials
+        # MB_results = np.zeros(len(gstepLproduct))
+        # local_results = np.zeros(len(cstepLproduct))
+        # #MB_trains = np.zeros(len(gstepLproduct))
+        # #local_trains = np.zeros(len(cstepLproduct)) 
+        # MB_tests = np.zeros(len(gstepLproduct))
+        # local_tests = np.zeros(len(cstepLproduct)) 
+        # for i, (stepsize, L) in enumerate(gstepLproduct):
+        #     #w = np.zeros(dim)
+        #     print('Stepsize {:.5f}:  {:d}/{:d}, L{:d}'.format(stepsize, i+1, len(gstepLproduct), L))
+        #     for rep in range(n_reps):
+        #         iterates, l, success = minibatch_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, L)
+        #         if success == 'converged':
+        #             MB_results[i] += (l[-1] - Fstar) / n_reps #average excess risk val over the n_reps= 4 trials 
+        #             MB_tests[i] += F_eval(np.average(iterates, axis=0), test_features, test_labels)/n_reps
+        #         else:
+        #             MB_results[i] += 5000000000
+        #             MB_tests[i] += 5000000000
+        # MB_ls[trial] = np.min(MB_results) 
+        # MB_step_index = np.argmin(MB_results) 
+        # #noisyMB_w_opt = noisyMB_w[noisyMB_step_index]
+        # MB_tests_trials[trial] = MB_tests[MB_step_index] 
+        # print('Doing Local SGD...') #for each stepsize option, compute average excess risk of LocalSGD over 4 trials
+        # for i, (stepsize, L) in enumerate(cstepLproduct):
+        #     #w = np.zeros(dim)
+        #     print('Stepsize {:.5f}:  {:d}/{:d}, L{:d}'.format(stepsize, i+1, len(cstepLproduct), L))
+        #     for rep in range(n_reps):
+        #         iterates, l, success = local_sgd(x_len, M, Mavail, K, R, stepsize, loss_freq, f_eval, grad_eval, L)
+        #         if success == 'converged':
+        #             local_results[i] += (l[-1] - Fstar) / n_reps #average excess risk over the n_reps= 4 trials
+        #             #w += np.average(iterates,axis=0) / n_reps 
+        #             local_tests[i] += F_eval(np.average(iterates, axis=0), test_features, test_labels)/n_reps
+        #         else:
+        #             local_results[i] += 5000000000
+        #             local_tests[i] += 5000000000
+        # local_ls[trial] = np.min(local_results) 
+        # local_stepL_index = np.argmin(local_results)  
+        # loc_tests_trials[trial] = local_tests[local_stepL_index]
         
         #####NON PRIVATE Distributed ALGS######
         print('Doing Minibatch SGD...') #for each stepsize option, compute average excess risk of MBSGD over n_reps trials
