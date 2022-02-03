@@ -17,6 +17,7 @@ import statsmodels.formula.api as smf
 import math
 import scipy
 import itertools
+import json
 from sklearn.model_selection import train_test_split
 
 
@@ -287,7 +288,7 @@ K = int(max(1, n*math.sqrt(max(epsilons)/(4*R)))) #needed for privacy by moments
 #K = int(max(1, n*max(epsilons)/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 
 
 
-path = 'dp_insurance_N={:d}_K={:d}_R={:d}'.format(N,K,R)
+path = 'dp_insurance_N={:d}_M={:d}_K={:d}'.format(N,Mavail, K)
 
 
 
@@ -298,16 +299,29 @@ noisylocal_ls = {}
 noisyMB_ls = {}
 noisyMB_tests_trials = {}
 noisyloc_tests_trials = {}
+
+noisyMB_NRMSE_trials = {}
+noisyloc_NRMSE_trials = {}
+
 for eps in epsilons:
     noisylocal_ls[eps] = np.ones(num_trials)*99999999999999999999999999999999
     noisyMB_ls[eps] = np.ones(num_trials)*99999999999999999999999999999999
     noisyMB_tests_trials[eps] = np.ones(num_trials)*99999999999999999999999999999999
     noisyloc_tests_trials[eps] = np.ones(num_trials)*99999999999999999999999999999999
+    noisyMB_NRMSE_trials[eps] = np.ones(num_trials)*99999999999999999999999999999999
+    noisyloc_NRMSE_trials[eps] = np.ones(num_trials)*99999999999999999999999999999999
+
 
 upsilon = np.zeros(num_trials)
 
 MB_tests_trials = np.zeros(num_trials)
 loc_tests_trials = np.zeros(num_trials)
+naiive_tests_trials = np.zeros(num_trials)
+
+MB_NRMSE_trials = np.zeros(num_trials)
+loc_NRMSE_trials = np.zeros(num_trials)
+
+OLS_NRMSE_trials = np.zeros(num_trials)
 
 lg_stepsizes = [np.exp(exponent) for exponent in np.linspace(-8,1,n_stepsizes)] #MB SGD #bigger range than log reg because optimum uncertain: D and L both very big
 lc_stepsizes = [np.exp(exponent) for exponent in np.linspace(-10,0,n_stepsizes)] #Local SGD
@@ -343,7 +357,29 @@ if DO_COMPUTE:
         print('Fstar = {:.6f}'.format(Fstar))
         print('upsilon^2 = {:.5f}'.format(upsilon[trial]))
         #Fstar_test = F_eval(wstar, test_features, test_labels)
-               
+        
+        ###NAIIVE BASELINE (mean of target using all N clients' data)### [used to normalize reported errors]
+        naiive = np.average(train_labels)
+        naiive_tests_trials[trial] = (np.linalg.norm(test_labels - naiive*np.ones(len(test_labels)))**2)/(2*len(test_labels))
+        
+#         #####(non-private) OLS### 
+#         mod = sm.OLS(train_labels, train_features)
+#         res = mod.fit()
+# #print(res.summary()) 
+# #rss = res.ssr
+# #print('train RSS is', rss)
+
+# #make predictions on test data: 
+#         yhat_test =  res.predict(test_features)
+#         test_residuals = test_labels - yhat_test 
+
+#         #test error (test RSS):
+#         OLS_test_RSS = np.linalg.norm(test_residuals)**2
+# #print('test_RSS is', test_RSS) 
+#         OLS_test_MSE = OLS_test_RSS/len(test_labels)
+#         OLS_NRMSE_trials[trial] = np.sqrt(OLS_test_MSE/naiive_tests_trials[trial])
+        
+        
         #####NON PRIVATE Distributed ALGS######
         print('Doing Minibatch SGD...') #for each stepsize option, compute average excess risk of MBSGD over n_reps trials
         MB_results = np.zeros(len(gstepLproduct))
@@ -366,7 +402,8 @@ if DO_COMPUTE:
         MB_ls[trial] = np.min(MB_results) 
         MB_step_index = np.argmin(MB_results) 
         #noisyMB_w_opt = noisyMB_w[noisyMB_step_index]
-        MB_tests_trials[trial] = MB_tests[MB_step_index] 
+        MB_tests_trials[trial] = MB_tests[MB_step_index]
+        MB_NRMSE_trials[trial] = np.sqrt(MB_tests_trials[trial]/naiive_tests_trials[trial])
         print('Doing Local SGD...') #for each stepsize option, compute average excess risk of LocalSGD over 4 trials
         for i, (stepsize, L) in enumerate(cstepLproduct):
             #w = np.zeros(dim)
@@ -383,6 +420,7 @@ if DO_COMPUTE:
         local_ls[trial] = np.min(local_results) 
         local_stepL_index = np.argmin(local_results)  
         loc_tests_trials[trial] = local_tests[local_stepL_index]
+        loc_NRMSE_trials[trial] = np.sqrt(loc_tests_trials[trial]/naiive_tests_trials[trial])
         
     ####Noisy algorithms####
         noisyMB_trains = {}
@@ -417,6 +455,7 @@ if DO_COMPUTE:
             t = noisyMB_tests[eps][noisyMB_step_index] 
             print("noisy MB test error for trial {:d} is".format(trial), t)
             noisyMB_tests_trials[eps][trial] = t
+            noisyMB_NRMSE_trials[eps][trial] = np.sqrt(noisyMB_tests_trials[eps][trial]/naiive_tests_trials[trial])
         
             print('Doing Noisy Local GD...')  
             for i, (stepsize, L) in enumerate(cstepLproduct): 
@@ -436,13 +475,9 @@ if DO_COMPUTE:
             u = noisyloc_tests[eps][noisyloc_stepL_index] 
             print("noisy loc test error for trial {:d} is".format(trial), u)
             noisyloc_tests_trials[eps][trial] = u
+            noisyloc_NRMSE_trials[eps][trial] = np.sqrt(noisyloc_tests_trials[eps][trial]/naiive_tests_trials[trial])
+            
 
-      
-print("noisy MB test errors", noisyMB_tests_trials)
-print("noisy loc test errors", noisyloc_tests_trials)
-print("MB test errors", MB_tests_trials)
-print("local SGD test errors", loc_tests_trials)
-print("upsilon^2", upsilon)
 
  #########PLOTS########
  
@@ -460,9 +495,9 @@ noisyMB_means = {}
 noisyMB_lows = {}
 noisyMB_his = {}
 for e, eps in enumerate(epsilons):
-    noisyMB_means[eps] = np.average(noisyMB_tests_trials[eps])
-    noisyMB_lows[eps] = max(0.0, percentile(noisyMB_tests_trials[eps], lower_p))
-    noisyMB_his[eps] = min(1.0, percentile(noisyMB_tests_trials[eps], upper_p))
+    noisyMB_means[eps] = np.average(noisyMB_NRMSE_trials[eps])
+    noisyMB_lows[eps] = max(0.0, percentile(noisyMB_NRMSE_trials[eps], lower_p))
+    noisyMB_his[eps] = min(1.0, percentile(noisyMB_NRMSE_trials[eps], upper_p))
     noisyMB_errs[e] = (noisyMB_his[eps] - noisyMB_lows[eps])/2
 
 noisyMB_means_sorted = list(zip(*sorted(noisyMB_means.items())))[1] 
@@ -475,9 +510,9 @@ noisyloc_means = {}
 noisyloc_lows = {}
 noisyloc_his = {}
 for e, eps in enumerate(epsilons):
-    noisyloc_means[eps] = np.average(noisyloc_tests_trials[eps])
-    noisyloc_lows[eps] = max(0.0, percentile(noisyloc_tests_trials[eps], lower_p))
-    noisyloc_his[eps] = min(1.0, percentile(noisyloc_tests_trials[eps], upper_p))
+    noisyloc_means[eps] = np.average(noisyloc_NRMSE_trials[eps])
+    noisyloc_lows[eps] = max(0.0, percentile(noisyloc_NRMSE_trials[eps], lower_p))
+    noisyloc_his[eps] = min(1.0, percentile(noisyloc_NRMSE_trials[eps], upper_p))
     noisyloc_errs[e] = (noisyloc_his[eps] - noisyloc_lows[eps])/2
 
 noisyloc_means_sorted = list(zip(*sorted(noisyloc_means.items())))[1] 
@@ -487,9 +522,9 @@ ax.errorbar(epsilons, noisyloc_means_sorted, yerr = noisyloc_errs, color = '#ff7
 
 #MB SGD#
 MB_errs = np.zeros(len(epsilons))
-MB_mean = np.average(MB_tests_trials)
-MB_low = max(0.0, percentile(MB_tests_trials, lower_p))
-MB_hi = min(1.0, percentile(MB_tests_trials, upper_p))
+MB_mean = np.average(MB_NRMSE_trials)
+MB_low = max(0.0, percentile(MB_NRMSE_trials, lower_p))
+MB_hi = min(1.0, percentile(MB_NRMSE_trials, upper_p))
 for e, eps in enumerate(epsilons):
     MB_errs[e] = (MB_hi - MB_low)/2
 ax.errorbar(epsilons, [MB_mean]*len(epsilons), yerr = MB_errs, color = '#2ca02c', ecolor='lightgreen', mfc='#2ca02c',
@@ -497,9 +532,9 @@ ax.errorbar(epsilons, [MB_mean]*len(epsilons), yerr = MB_errs, color = '#2ca02c'
 
 #Local SGD#
 loc_errs = np.zeros(len(epsilons))
-loc_mean = np.average(loc_tests_trials)
-loc_low = max(0.0, percentile(loc_tests_trials, lower_p))
-loc_hi = min(1.0, percentile(loc_tests_trials, upper_p))
+loc_mean = np.average(loc_NRMSE_trials)
+loc_low = max(0.0, percentile(loc_NRMSE_trials, lower_p))
+loc_hi = min(1.0, percentile(loc_NRMSE_trials, upper_p))
 for e, eps in enumerate(epsilons):
     loc_errs[e] = (loc_hi - loc_low)/2
 ax.errorbar(epsilons, [loc_mean]*len(epsilons), yerr = loc_errs, color = '#d62728', ecolor='lightcoral', mfc='#d62728',
@@ -508,36 +543,113 @@ ax.errorbar(epsilons, [loc_mean]*len(epsilons), yerr = loc_errs, color = '#d6272
 
 handles,labels = ax.get_legend_handles_labels()
 ax.set_xlabel(r'$\epsilon$')
-ax.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials))
+#ax.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials))
+ax.set_ylabel('Relative Test RMSE ({:d} Trials)'.format(num_trials)) 
 #ax.set_title('K = {:d}, $\upsilon$={:.2f}, {:d} Trials'.format(K, np.average(upsilon), num_trials))  
 ax.set_title(r'N = {:d}, M = {:d}, K = {:d}, $\upsilon_*^2$={:.1f}'.format(N, Mavail, K, np.average(upsilon)))
 ax.legend(handles, labels, loc='upper right')
-plt.savefig('plots' + path + 'errorbar_lin_test_error_vs_epsilon.png', dpi=400)
+plt.savefig('plots' + path + 'errorbar_lin_test_error_vs_epsilon.svg', dpi=400)
 plt.show()
 
-###no error bars version###
-###PLOT test error vs. epsilon###
-fig2 = plt.figure()
-ax2 = fig2.add_subplot(111)
-noisyMB_test_errors_sorted = sorted(noisyMB_tests_trials.items()) # sorted by key, return a list of tuples
-noisyloc_test_errors_sorted = sorted(noisyloc_tests_trials.items())
-l = list(zip(*noisyMB_test_errors_sorted))[1]
-m = []
-for i in range(len(l)):
-    m.append(np.average(l[i]))
-l2 = list(zip(*noisyloc_test_errors_sorted))[1]
-m2 = []
-for i in range(len(l2)):
-    m2.append(np.average(l2[i]))
+# ###no error bars version###
+# ###PLOT test error vs. epsilon###
+# fig2 = plt.figure()
+# ax2 = fig2.add_subplot(111)
+# noisyMB_test_errors_sorted = sorted(noisyMB_tests_trials.items()) # sorted by key, return a list of tuples
+# noisyloc_test_errors_sorted = sorted(noisyloc_tests_trials.items())
+# l = list(zip(*noisyMB_test_errors_sorted))[1]
+# m = []
+# for i in range(len(l)):
+#     m.append(np.average(l[i]))
+# l2 = list(zip(*noisyloc_test_errors_sorted))[1]
+# m2 = []
+# for i in range(len(l2)):
+#     m2.append(np.average(l2[i]))
 
-ax2.plot(epsilons, m, label='Noisy MB SGD after {:d} rounds'.format(R))
-ax2.plot(epsilons, m2,label='Noisy Local SGD after {:d} rounds'.format(R))
-ax2.plot(epsilons, [np.average(MB_tests_trials)]*len(epsilons), label = 'MB SGD after {:d} rounds'.format(R))
-ax2.plot(epsilons, [np.average(loc_tests_trials)]*len(epsilons), label = 'Local SGD after {:d} rounds'.format(R))
-handles,labels = ax2.get_legend_handles_labels()
-ax2.set_xlabel(r'$\epsilon$')
-ax2.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials)) 
-ax2.set_title(r'N = {:d}, M = {:d}, K = {:d}, $\upsilon_*^2$={:.1f}'.format(N, Mavail, K, np.average(upsilon)))
-ax2.legend(handles, labels, loc='upper right')
-plt.savefig('plots' + path + 'lin_test_error_vs_epsilon.png', dpi=400)
-plt.show()
+# ax2.plot(epsilons, m, label='Noisy MB SGD after {:d} rounds'.format(R))
+# ax2.plot(epsilons, m2,label='Noisy Local SGD after {:d} rounds'.format(R))
+# ax2.plot(epsilons, [np.average(MB_tests_trials)]*len(epsilons), label = 'MB SGD after {:d} rounds'.format(R))
+# ax2.plot(epsilons, [np.average(loc_tests_trials)]*len(epsilons), label = 'Local SGD after {:d} rounds'.format(R))
+# handles,labels = ax2.get_legend_handles_labels()
+# ax2.set_xlabel(r'$\epsilon$')
+# #ax2.set_ylabel('Avg. Test Error ({:d} Trials)'.format(num_trials)) 
+# ax2.set_ylabel('Relative Test RMSE ({:d} Trials)'.format(num_trials)) 
+# ax2.set_title(r'N = {:d}, M = {:d}, K = {:d}, $\upsilon_*^2$={:.1f}'.format(N, Mavail, K, np.average(upsilon)))
+# ax2.legend(handles, labels, loc='upper right')
+# plt.savefig('plots' + path + 'lin_test_error_vs_epsilon.svg', dpi=400)
+# plt.show()
+
+###SAVE RESULTS###
+# print("noisy MB test squared errors", noisyMB_tests_trials)
+# print("noisy loc test squared errors", noisyloc_tests_trials)
+# print("MB test sq. errors", MB_tests_trials)
+# print("local SGD test sq. errors", loc_tests_trials)
+# print("naiive test sq. errors", naiive_tests_trials)
+
+
+# create json objects from dictionaries/arrays
+#NRMSE  
+#convert arrays within dictionaries to lists (before json)
+noisyMB_NRMSE_trials_lists = {}
+noisyloc_NRMSE_trials_lists = {}
+for eps in epsilons:
+    noisyMB_NRMSE_trials_lists[eps] = noisyMB_NRMSE_trials[eps].tolist()
+    noisyloc_NRMSE_trials_lists[eps] = noisyloc_NRMSE_trials[eps].tolist()
+noisyMB_NRMSE_trials_json = json.dumps(noisyMB_NRMSE_trials_lists)
+noisyloc_NRMSE_trials_json = json.dumps(noisyloc_NRMSE_trials_lists)
+
+MB_NRMSE_trials_list = MB_NRMSE_trials.tolist() 
+MB_NRMSE_trials_json = json.dumps(MB_NRMSE_trials_list)
+loc_NRMSE_trials_list = loc_NRMSE_trials.tolist() 
+loc_NRMSE_trials_json = json.dumps(loc_NRMSE_trials_list)
+
+#MSE 
+noisyMB_tests_trials_lists = {}
+noisyloc_tests_trials_lists = {}
+for eps in epsilons:
+    noisyMB_tests_trials_lists[eps] = noisyMB_tests_trials[eps].tolist()
+    noisyloc_tests_trials_lists[eps] = noisyloc_tests_trials[eps].tolist()
+noisyMB_tests_trials_json = json.dumps(noisyMB_tests_trials_lists)
+noisyloc_tests_trials_json = json.dumps(noisyloc_tests_trials_lists)
+
+MB_tests_trials_list = MB_tests_trials.tolist() 
+MB_tests_trials_json = json.dumps(MB_tests_trials_list)
+loc_tests_trials_list = loc_tests_trials.tolist() 
+loc_tests_trials_json = json.dumps(loc_tests_trials_list)
+#naiive
+naiive_tests_trials_list = naiive_tests_trials.tolist() 
+naiive_tests_trials_json = json.dumps(naiive_tests_trials_list)
+
+#upsilons
+upsilon_list = upsilon.tolist() 
+upsilon_json = json.dumps(upsilon_list)
+
+
+# open file for writing, "w" 
+f = open(path + "results.json","w")
+
+# write json object to file
+f.write("noisyMB_NRMSE:" + noisyMB_NRMSE_trials_json)
+f.write("\n\n")
+f.write("noisyloc_NRMSE:" + noisyloc_NRMSE_trials_json)
+f.write("\n\n")
+f.write("MB_NRMSE:" + MB_NRMSE_trials_json)
+f.write("\n\n")
+f.write("loc_NRMSE:" + loc_NRMSE_trials_json)
+f.write("\n\n")
+
+f.write("noisyMB_MSE:" + noisyMB_tests_trials_json)
+f.write("\n\n")
+f.write("noisyloc_MSE:" + noisyloc_tests_trials_json)
+f.write("\n\n")
+f.write("MB_MSE:" + MB_tests_trials_json)
+f.write("\n\n")
+f.write("loc_MSE:" + loc_tests_trials_json)
+f.write("\n\n")
+
+f.write("naiive MSE:"+naiive_tests_trials_json)
+f.write("\n\n")
+
+f.write("upsilons:" + upsilon_json)
+# close file
+f.close()
