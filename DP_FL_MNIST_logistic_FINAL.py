@@ -286,22 +286,22 @@ def gauss_AC(d, eps, delta, n, R, L, K): #moments account form of noise
     return np.random.multivariate_normal(mean = np.zeros(d), cov = (8*(L**2)*R*np.log(1/delta)/(n**2 * eps**2))*np.eye(d))
 
 ##################################################################################################################
-p = 0 #for full heterogeneity; also try p = 0.5 and p = 1
+p = 0 #for full heterogeneity; can also try p = 1 for i.i.d. 
 #dim = 100
 dim = 50
-M = 25
-Mavail = 12  
+M = 25 
+Mavail = 12
 path = 'temp'
 n_m = load_MNIST2(p, dim, path)[-1] #number of examples (train and test) per digit per machine 
 n = int(n_m*2*0.8) #total number of TRAINING examples (two digits) per machine 
 DO_COMPUTE = True
 
 ###User parameters - you can manually adjust these:### 
-#num_trials = 20 
-num_trials = 1 
+#num_trials = 1
+num_trials = 20 
 #each trial involves a new train/test split for all N = M clients
 loss_freq = 5 
-#n_reps = 3 #number of runs per train split 
+#n_reps = 3 #number of runs per train split (for hyperparameter tuning)
 n_reps = 3
 n_stepsizes = 10
 #n_stepsizes = 8
@@ -309,11 +309,8 @@ n_stepsizes = 10
 epsilons = [0.75, 1.5, 3, 6, 12, 18]
 delta = 1/(n**2)
 #Note: for q = 1/7, we have 2*math.log(1/delta) = 28.485009812978166 (= maximal allowable epsilon for DP via moments account)
-#Rs = [15, 25]
-#R = 15
-R = 35 #then do R = 50 
+R = 35 
 K = int(max(1, n*math.sqrt(18/(4*R)))) #needed for privacy by moments account; 18 = largest epsilon that we test
-#K = int(max(1, n*18/(4*math.sqrt(2*R*math.log(2/delta))))) #needed for privacy by advanced comp; 18 = largest epsilon that we test
 
 path = 'dp_mnist_p={:.2f}_K={:d}_R={:d}'.format(p,K,R)
 
