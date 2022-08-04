@@ -1,4 +1,5 @@
-#Client-Level Local-Differentially-Private-Federated-Learning
+Client-Level Local-Differentially-Private-Federated-Learning
+
 Code for the paper "Private Federated Learning Without a Trusted Server: Optimal Algorithms for Convex Losses," by Andrew Lowy &amp; Meisam Razaviyayn. The paper can be found at: https://arxiv.org/abs/2106.09779
 
 Our code requires Python 3 to run. 
