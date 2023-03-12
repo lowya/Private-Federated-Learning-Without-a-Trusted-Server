@@ -1,21 +1,8 @@
-This repository contains code for the paper "Private Federated Learning Without a Trusted Server: Optimal Algorithms for Convex Losses," by Andrew Lowy &amp; Meisam Razaviyayn. The paper can be found at: https://arxiv.org/abs/2106.09779
+This repository contains code for the ICLR 2023 paper "Private Federated Learning Without a Trusted Server: Optimal Algorithms for Convex Losses," by Andrew Lowy &amp; Meisam Razaviyayn. The paper can be found at: https://openreview.net/forum?id=TVY6GoURrw
 
-**Abstract:**
-This paper studies federated learning (FL) in the absence of a trustworthy server/clients. In this
-setting, each client needs to ensure the privacy of its own data, even if the server or other clients act
-adversarially. This requirement motivates the study of local differential privacy (LDP) at the client level.
-We provide tight (up to logarithms) upper and lower bounds for LDP convex/strongly convex federated
-stochastic optimization with homogeneous (i.i.d.) client data. The LDP rates match the optimal statistical
-rates in certain practical parameter regimes, resulting in “privacy for free.” Remarkably, we show that
-similar rates are attainable for smooth losses with arbitrary heterogeneous client data distributions, via a
-linear-time accelerated LDP algorithm. We also provide tight upper and lower bounds for LDP federated
-empirical risk minimization (ERM). While tight upper bounds for ERM were provided in prior work, we
-use acceleration to attain these bounds in fewer rounds of communication. Finally, with a secure “shuffler”
-to anonymize client reports (but without the presence of a trusted server), our algorithm attains the
-optimal central differentially private rates for stochastic convex/strongly convex optimization. Numerical
-experiments validate our theory and show favorable privacy-accuracy tradeoffs for our algorithm.
+This paper studies federated learning (FL)—especially cross-silo FL—with data from people who do not trust the server or other silos. In this setting, each silo (e.g. hospital) has data from different people (e.g. patients) and must maintain the privacy of each person’s data (e.g. medical record), even if the server or other silos act as adversarial eavesdroppers. This requirement motivates the study of Inter-Silo Record-Level Differential Privacy (ISRL-DP), which requires silo i’s communications to satisfy record/item-level differential privacy (DP). ISRL-DP ensures that the data of each person (e.g. patient) in silo i (e.g. hospital i) cannot be leaked. ISRL-DP is different from well-studied privacy notions. Central and user-level DP assume that people trust the server/other silos. On the other end of the spectrum, local DP assumes that people do not trust anyone at all (even their own silo). Sitting between central and local DP, ISRL-DP makes the realistic assumption (in cross-silo FL) that people trust their own silo, but not the server or other silos. In this work, we provide tight (up to logarithms) upper and lower bounds for ISRL-DP FL with convex/strongly convex loss functions and homogeneous (i.i.d.) silo data. Remarkably, we show that similar bounds are attainable for smooth losses with arbitrary heterogeneous silo data distributions, via an accelerated ISRL-DP algorithm. We also provide tight upper and lower bounds for ISRL-DP federated empirical risk minimization, and use acceleration to attain the optimal bounds in fewer rounds of communication than the state-of-the-art. Finally, with a secure “shuffler” to anonymize silo messages (but without a trusted server), our algorithm attains the optimal central DP rates under more practical trust assumptions. Numerical experiments show favorable privacy-accuracy tradeoffs for our algorithm in classification and regression tasks.
 
-**Requirements:**
+**Code Requirements:**
 Our code requires Python 3 to run. 
 Dependencies: math, numpy, matplotlib, torchvision, sklearn, pandas, scipy, itertools 
 
